@@ -8,7 +8,14 @@ Get metadata of the active (foreground) window:
  - owner
  - URL of the current browser tab (MacOS only)
 
-Supports Windows, MacOS, and Linux (X.Org)
+### TODO
+
+This crate is not feature-complete yet
+
+- [x] Windows support
+- [ ] Linux (X11) support
+- [ ] Linux (Wayland) support
+- [ ] MacOS support
 
 ### Troubleshooting
 
@@ -16,4 +23,5 @@ Users on macOS 10.13 or earlier needs to download the Swift runtime support libr
 
 ### Acknowledgements
 
-[active-win](https://github.com/sindresorhus/active-win) node library for reference implementation
+* [active-win: nodejs counterpart and inspiration for this crate](https://github.com/sindresorhus/active-win) 
+* [x11_get_windows: implementation for X11](https://github.com/HiruNya/x11_get_windows)
