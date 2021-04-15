@@ -1,0 +1,12 @@
+[package]
+name = "active-window"
+version = "0.0.0"
+authors = ["Mike Lubinets <git@mkl.dev>"]
+description = "Get metadata of the current active window"
+keywords = ["windows", "linux", "macos", "active", "window"]
+categories = ["api-bindings", "os"]
+repository = "https://github.com/mersinvald/active-window"
+edition = "2018"
+license = "MIT"
+
+[dependencies]
