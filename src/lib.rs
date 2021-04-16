@@ -401,7 +401,7 @@ mod windows {
 
     unsafe extern "system" fn get_subwindow_process_path_callback(
         hwnd: HWND,
-        param: LPARAM,
+        _param: LPARAM,
     ) -> i32 {
         let handle = if let Some((_, handle)) = get_process_id_and_handle(hwnd) {
             handle
@@ -432,7 +432,7 @@ mod windows {
             return None;
         }
 
-        Some((owner_id, owner_handle))
+        Some((owner_id as i64, owner_handle))
     }
 }
 
