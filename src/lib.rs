@@ -50,11 +50,16 @@ pub struct OwnerInfo {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::{ffi::CStr, mem::MaybeUninit, os::raw::{c_int, c_ulong}, ptr};
+    use std::{
+        ffi::CStr,
+        mem::MaybeUninit,
+        os::raw::{c_int, c_ulong},
+        ptr,
+    };
 
-    use procfs::process::Process;
-    use x11_dl::xlib::{Atom, Display, Success, XA_CARDINAL, XA_WM_NAME, XTextProperty, Xlib};
     use once_cell::sync::Lazy;
+    use procfs::process::Process;
+    use x11_dl::xlib::{Atom, Display, Success, XTextProperty, Xlib, XA_CARDINAL, XA_WM_NAME};
 
     use super::*;
 
@@ -68,7 +73,8 @@ mod linux {
                 // Get window currently in focus
                 let mut window = MaybeUninit::<c_ulong>::uninit();
                 let mut revert_to = MaybeUninit::<c_int>::uninit();
-                let status = (XLIB.XGetInputFocus)(display, window.as_mut_ptr(), revert_to.as_mut_ptr());
+                let status =
+                    (XLIB.XGetInputFocus)(display, window.as_mut_ptr(), revert_to.as_mut_ptr());
 
                 let window = window.assume_init();
 
@@ -83,7 +89,7 @@ mod linux {
                     owner: get_owner(display, window)?,
                     url: None,
                 })
-            } 
+            }
         }
 
         unsafe {
@@ -97,31 +103,29 @@ mod linux {
         }
     }
 
-
     const MAX_PROPERTY_LENGTH: i64 = 1024;
 
     unsafe fn get_title(display: *mut Display, window: Window) -> Option<String> {
-        let mut wm_name_atom = (XLIB.XInternAtom)(display, CStr::from_bytes_with_nul_unchecked(b"_NET_WM_NAME\0").as_ptr(), 0);
-        
+        let mut wm_name_atom = (XLIB.XInternAtom)(
+            display,
+            CStr::from_bytes_with_nul_unchecked(b"_NET_WM_NAME\0").as_ptr(),
+            0,
+        );
+
         // Fallback to WM_NAME
         if wm_name_atom == 0 {
             wm_name_atom = XA_WM_NAME;
         }
 
         let mut property = MaybeUninit::uninit();
-        let status = (XLIB.XGetTextProperty)(
-            display,
-            window,
-            property.as_mut_ptr(),
-            wm_name_atom,
-        );
+        let status = (XLIB.XGetTextProperty)(display, window, property.as_mut_ptr(), wm_name_atom);
 
         if status == 0 {
             return None;
         }
 
         let property = property.assume_init();
-        
+
         if property.nitems == 0 || property.encoding == 0 || property.value.is_null() {
             if !property.value.is_null() {
                 (XLIB.XFree)(property.value as *mut _);
@@ -129,30 +133,30 @@ mod linux {
             return None;
         }
 
-
         let title = text_property_to_string(&property);
 
         (XLIB.XFree)(property.value as *mut _);
 
         title
-        
     }
 
     unsafe fn get_bounds(display: *mut Display, window: Window) -> Option<BoundsInfo> {
-        let mut root = 0; 
-        let mut x = 0; 
-        let mut y = 0; 
+        let mut root = 0;
+        let mut x = 0;
+        let mut y = 0;
         let mut w = 0;
         let mut h = 0;
         let mut bw = 0;
         let mut d = 0;
-        
+
         let status = (XLIB.XGetGeometry)(
-            display, 
+            display,
             window,
-            ptr::addr_of_mut!(root), 
-            ptr::addr_of_mut!(x), ptr::addr_of_mut!(y),
-            ptr::addr_of_mut!(w), ptr::addr_of_mut!(h),
+            ptr::addr_of_mut!(root),
+            ptr::addr_of_mut!(x),
+            ptr::addr_of_mut!(y),
+            ptr::addr_of_mut!(w),
+            ptr::addr_of_mut!(h),
             ptr::addr_of_mut!(bw),
             ptr::addr_of_mut!(d),
         );
@@ -170,7 +174,11 @@ mod linux {
     }
 
     unsafe fn get_owner(display: *mut Display, window: Window) -> Option<OwnerInfo> {
-        let wm_pid_atom = (XLIB.XInternAtom)(display, CStr::from_bytes_with_nul_unchecked(b"_NET_WM_PID\0").as_ptr(), 0);
+        let wm_pid_atom = (XLIB.XInternAtom)(
+            display,
+            CStr::from_bytes_with_nul_unchecked(b"_NET_WM_PID\0").as_ptr(),
+            0,
+        );
 
         let mut actual_type: Atom = 0;
         let mut actual_format: c_int = 0;
@@ -179,13 +187,13 @@ mod linux {
         let mut value: *mut u8 = ptr::null_mut();
 
         let status = (XLIB.XGetWindowProperty)(
-            display, 
-            window, 
-            wm_pid_atom, 
-            0, 
-            MAX_PROPERTY_LENGTH, 
-            0, 
-            XA_CARDINAL, 
+            display,
+            window,
+            wm_pid_atom,
+            0,
+            MAX_PROPERTY_LENGTH,
+            0,
+            XA_CARDINAL,
             ptr::addr_of_mut!(actual_type),
             ptr::addr_of_mut!(actual_format),
             ptr::addr_of_mut!(nitems),
@@ -221,16 +229,18 @@ mod linux {
             8 => {
                 let data = std::slice::from_raw_parts(prop.value, prop.nitems as usize);
                 String::from_utf8(data.to_vec()).ok()
-            },
+            }
             16 => {
-                let data = std::slice::from_raw_parts(prop.value as *const u16, prop.nitems as usize);
+                let data =
+                    std::slice::from_raw_parts(prop.value as *const u16, prop.nitems as usize);
                 String::from_utf16(data).ok()
-            },
+            }
             32 => {
-                let data = std::slice::from_raw_parts(prop.value as *const u32, prop.nitems as usize);
+                let data =
+                    std::slice::from_raw_parts(prop.value as *const u32, prop.nitems as usize);
                 data.iter().copied().map(std::char::from_u32).collect()
-            },
-            _ => None
+            }
+            _ => None,
         }
     }
 }
