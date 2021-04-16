@@ -27,7 +27,7 @@ pub struct WindowInfo {
 }
 
 pub type WindowId = usize;
-pub type ProcessId = u32;
+pub type ProcessId = i64;
 pub type BundleId = usize;
 
 #[cfg_attr(serde, derive(serde::Serialize, serde::Deserialize))]
@@ -50,10 +50,188 @@ pub struct OwnerInfo {
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::{ffi::CStr, mem::MaybeUninit, os::raw::{c_int, c_ulong}, ptr};
+
+    use procfs::process::Process;
+    use x11_dl::xlib::{Atom, Display, Success, XA_CARDINAL, XA_WM_NAME, XTextProperty, Xlib};
+    use once_cell::sync::Lazy;
+
     use super::*;
 
+    type Window = c_ulong;
+
+    static XLIB: Lazy<Xlib> = Lazy::new(|| Xlib::open().unwrap());
+
     pub fn active_window() -> Option<WindowInfo> {
-        todo!()
+        fn inner(display: *mut Display) -> Option<WindowInfo> {
+            unsafe {
+                // Get window currently in focus
+                let mut window = MaybeUninit::<c_ulong>::uninit();
+                let mut revert_to = MaybeUninit::<c_int>::uninit();
+                let status = (XLIB.XGetInputFocus)(display, window.as_mut_ptr(), revert_to.as_mut_ptr());
+
+                let window = window.assume_init();
+
+                if status == 0 || window == 0 {
+                    return None;
+                }
+
+                Some(WindowInfo {
+                    title: get_title(display, window)?,
+                    id: window as usize,
+                    bounds: get_bounds(display, window)?,
+                    owner: get_owner(display, window)?,
+                    url: None,
+                })
+            } 
+        }
+
+        unsafe {
+            let display = (XLIB.XOpenDisplay)(ptr::null());
+
+            let result = inner(display);
+
+            (XLIB.XCloseDisplay)(display);
+
+            result
+        }
+    }
+
+
+    const MAX_PROPERTY_LENGTH: i64 = 1024;
+
+    unsafe fn get_title(display: *mut Display, window: Window) -> Option<String> {
+        let mut wm_name_atom = (XLIB.XInternAtom)(display, CStr::from_bytes_with_nul_unchecked(b"_NET_WM_NAME\0").as_ptr(), 0);
+        
+        // Fallback to WM_NAME
+        if wm_name_atom == 0 {
+            wm_name_atom = XA_WM_NAME;
+        }
+
+        let mut property = MaybeUninit::uninit();
+        let status = (XLIB.XGetTextProperty)(
+            display,
+            window,
+            property.as_mut_ptr(),
+            wm_name_atom,
+        );
+
+        if status == 0 {
+            return None;
+        }
+
+        let property = property.assume_init();
+        
+        if property.nitems == 0 || property.encoding == 0 || property.value.is_null() {
+            if !property.value.is_null() {
+                (XLIB.XFree)(property.value as *mut _);
+            }
+            return None;
+        }
+
+
+        let title = text_property_to_string(&property);
+
+        (XLIB.XFree)(property.value as *mut _);
+
+        title
+        
+    }
+
+    unsafe fn get_bounds(display: *mut Display, window: Window) -> Option<BoundsInfo> {
+        let mut root = 0; 
+        let mut x = 0; 
+        let mut y = 0; 
+        let mut w = 0;
+        let mut h = 0;
+        let mut bw = 0;
+        let mut d = 0;
+        
+        let status = (XLIB.XGetGeometry)(
+            display, 
+            window,
+            ptr::addr_of_mut!(root), 
+            ptr::addr_of_mut!(x), ptr::addr_of_mut!(y),
+            ptr::addr_of_mut!(w), ptr::addr_of_mut!(h),
+            ptr::addr_of_mut!(bw),
+            ptr::addr_of_mut!(d),
+        );
+
+        if status == 0 {
+            return None;
+        }
+
+        Some(BoundsInfo {
+            x: x as i32,
+            y: y as i32,
+            width: w as i32,
+            height: h as i32,
+        })
+    }
+
+    unsafe fn get_owner(display: *mut Display, window: Window) -> Option<OwnerInfo> {
+        let wm_pid_atom = (XLIB.XInternAtom)(display, CStr::from_bytes_with_nul_unchecked(b"_NET_WM_PID\0").as_ptr(), 0);
+
+        let mut actual_type: Atom = 0;
+        let mut actual_format: c_int = 0;
+        let mut nitems: c_ulong = 0;
+        let mut bytes_after: c_ulong = 0;
+        let mut value: *mut u8 = ptr::null_mut();
+
+        let status = (XLIB.XGetWindowProperty)(
+            display, 
+            window, 
+            wm_pid_atom, 
+            0, 
+            MAX_PROPERTY_LENGTH, 
+            0, 
+            XA_CARDINAL, 
+            ptr::addr_of_mut!(actual_type),
+            ptr::addr_of_mut!(actual_format),
+            ptr::addr_of_mut!(nitems),
+            ptr::addr_of_mut!(bytes_after),
+            ptr::addr_of_mut!(value),
+        );
+
+        if status != Success.into() || value.is_null() {
+            if !value.is_null() {
+                (XLIB.XFree)(value.cast());
+            }
+            return None;
+        }
+
+        let owner_pid: u32 = value.cast::<u32>().read();
+        (XLIB.XFree)(value.cast());
+
+        let process = Process::new(owner_pid as i32).ok()?;
+
+        let path = process.exe().ok()?;
+        let name = path.file_name()?.to_str()?.to_string();
+
+        Some(OwnerInfo {
+            name,
+            path,
+            id: owner_pid as i64,
+            bundle: None,
+        })
+    }
+
+    unsafe fn text_property_to_string(prop: &XTextProperty) -> Option<String> {
+        match prop.format {
+            8 => {
+                let data = std::slice::from_raw_parts(prop.value, prop.nitems as usize);
+                String::from_utf8(data.to_vec()).ok()
+            },
+            16 => {
+                let data = std::slice::from_raw_parts(prop.value as *const u16, prop.nitems as usize);
+                String::from_utf16(data).ok()
+            },
+            32 => {
+                let data = std::slice::from_raw_parts(prop.value as *const u32, prop.nitems as usize);
+                data.iter().copied().map(std::char::from_u32).collect()
+            },
+            _ => None
+        }
     }
 }
 
@@ -164,7 +342,7 @@ mod windows {
         Some(OwnerInfo {
             name: owner_name.to_str()?.to_string(),
             path: owner_path,
-            id: owner_id,
+            id: owner_id as i64,
             bundle: None,
         })
     }

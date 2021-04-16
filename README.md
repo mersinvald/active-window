@@ -13,7 +13,7 @@ Get metadata of the active (foreground) window:
 This crate is not feature-complete yet
 
 - [x] Windows support
-- [ ] Linux (X11) support
+- [x] Linux (X11) support
 - [ ] Linux (Wayland) support
 - [ ] MacOS support
 
