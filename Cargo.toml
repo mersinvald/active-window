@@ -14,5 +14,5 @@ serde = { version = "1", default_features = false, features = ["derive"], option
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-user32-sys = "0.2"
+winapi = { version = "0.3", features = ["winuser", "windef", "processthreadsapi", "handleapi", "winbase"] }
 
