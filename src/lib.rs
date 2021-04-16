@@ -18,7 +18,7 @@ pub struct WindowInfo {
     pub title: String,
     /// Unique window id
     pub id: WindowId,
-    /// Window ize and position 
+    /// Window ize and position
     pub bounds: BoundsInfo,
     /// Information about the owning process
     pub owner: OwnerInfo,
@@ -52,27 +52,36 @@ pub struct OwnerInfo {
 mod linux {
     use super::*;
 
-    pub fn active_window() -> WindowInfo {
+    pub fn active_window() -> Option<WindowInfo> {
         todo!()
     }
 }
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use std::{mem::MaybeUninit, path::{Path, PathBuf}};
+    use std::{
+        mem::MaybeUninit,
+        path::{Path, PathBuf},
+    };
 
     use super::*;
 
-    use winapi::{ctypes::c_void, shared::{minwindef::{LPARAM, TRUE}, windef::RECT}, um::winuser::{EnumChildWindows, GetWindowRect}};
-    use winapi::{shared::{minwindef::FALSE, windef::HWND}, um::winnt::PROCESS_QUERY_LIMITED_INFORMATION};
-    use winapi::um::processthreadsapi::OpenProcess;
-    use winapi::um::winbase::QueryFullProcessImageNameW;
-    use winapi::um::handleapi::CloseHandle;
-    use winapi::um::winuser::{
-        GetForegroundWindow,
-        GetWindowTextLengthW,
-        GetWindowTextW,
-        GetWindowThreadProcessId,
+    use winapi::{
+        ctypes::c_void,
+        shared::{
+            minwindef::{FALSE, LPARAM, TRUE},
+            windef::{HWND, RECT},
+        },
+        um::{
+            handleapi::CloseHandle,
+            processthreadsapi::OpenProcess,
+            winbase::QueryFullProcessImageNameW,
+            winnt::PROCESS_QUERY_LIMITED_INFORMATION,
+            winuser::{
+                EnumChildWindows, GetForegroundWindow, GetWindowRect, GetWindowTextLengthW,
+                GetWindowTextW, GetWindowThreadProcessId,
+            },
+        },
     };
 
     type ProcessHandle = *mut c_void;
@@ -80,10 +89,10 @@ mod windows {
     pub fn active_window() -> Option<WindowInfo> {
         let handle = unsafe { GetForegroundWindow() };
         if handle.is_null() {
-             return None;
+            return None;
         }
 
-        Some(WindowInfo { 
+        Some(WindowInfo {
             id: handle as WindowId,
             title: get_title(handle)?,
             bounds: get_bounds(handle)?,
@@ -94,7 +103,7 @@ mod windows {
 
     fn get_title(handle: HWND) -> Option<String> {
         let name_length = unsafe { GetWindowTextLengthW(handle) };
-        
+
         if name_length < 0 {
             return None;
         }
@@ -129,12 +138,12 @@ mod windows {
 
     fn get_owner(handle: HWND) -> Option<OwnerInfo> {
         let mut owner_id: u32 = 0;
-        
+
         let owner_handle = unsafe {
             GetWindowThreadProcessId(handle, &mut owner_id as *mut u32);
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, owner_id)
         };
-        
+
         if owner_handle.is_null() {
             return None;
         }
@@ -162,29 +171,45 @@ mod windows {
 
     fn get_process_path(handle: ProcessHandle) -> Option<PathBuf> {
         // Set the path length to more than the Windows extended-length MAX_PATH length
-	    // The maximum path of 32,767 characters is approximate, because the "\\?\" prefix may be expanded to a longer string by the system at run time, and this expansion applies to the total length.
+        // The maximum path of 32,767 characters is approximate, because the "\\?\" prefix may be expanded to a longer string by the system at run time, and this expansion applies to the total length.
         const MAX_PATH_LENGTH: usize = 66000;
         const PATH_CHAR_COUNT: u32 = MAX_PATH_LENGTH as u32 / 2;
 
         let mut process_path_buffer = vec![0; MAX_PATH_LENGTH];
-        let mut process_path_length  = PATH_CHAR_COUNT;
+        let mut process_path_length = PATH_CHAR_COUNT;
 
-        unsafe { 
-            QueryFullProcessImageNameW(handle, 0, process_path_buffer.as_mut_ptr(), &mut process_path_length as *mut _);
+        unsafe {
+            QueryFullProcessImageNameW(
+                handle,
+                0,
+                process_path_buffer.as_mut_ptr(),
+                &mut process_path_length as *mut _,
+            );
         }
 
         // Find last non-null character position
         let path_end = process_path_buffer.iter().position(|&x| x == 0)?;
 
-        Some(String::from_utf16(&process_path_buffer[..path_end]).ok()?.into())
+        Some(
+            String::from_utf16(&process_path_buffer[..path_end])
+                .ok()?
+                .into(),
+        )
     }
 
-    fn get_subwindow_process_path(active_window_handle: HWND, process_path: &Path) -> Option<PathBuf> {
-        unsafe { 
-            SUBPROCESS_PATH = None; 
-            PROCESS_PATH = Some(process_path.to_owned()); 
+    fn get_subwindow_process_path(
+        active_window_handle: HWND,
+        process_path: &Path,
+    ) -> Option<PathBuf> {
+        unsafe {
+            SUBPROCESS_PATH = None;
+            PROCESS_PATH = Some(process_path.to_owned());
 
-            EnumChildWindows(active_window_handle, Some(get_subwindow_process_path_callback), 0);
+            EnumChildWindows(
+                active_window_handle,
+                Some(get_subwindow_process_path_callback),
+                0,
+            );
 
             let subprocess_path = SUBPROCESS_PATH.take();
             let process_path = PROCESS_PATH.take();
@@ -196,8 +221,11 @@ mod windows {
     static mut PROCESS_PATH: Option<PathBuf> = None;
     static mut SUBPROCESS_PATH: Option<PathBuf> = None;
 
-    unsafe extern "system" fn get_subwindow_process_path_callback(hwnd: HWND, param: LPARAM) -> i32 {
-        let handle = if let Some((_, handle)) =  get_process_id_and_handle(hwnd) {
+    unsafe extern "system" fn get_subwindow_process_path_callback(
+        hwnd: HWND,
+        param: LPARAM,
+    ) -> i32 {
+        let handle = if let Some((_, handle)) = get_process_id_and_handle(hwnd) {
             handle
         } else {
             return FALSE;
@@ -216,7 +244,7 @@ mod windows {
 
     fn get_process_id_and_handle(handle: HWND) -> Option<(ProcessId, ProcessHandle)> {
         let mut owner_id: u32 = 0;
-        
+
         let owner_handle = unsafe {
             GetWindowThreadProcessId(handle, &mut owner_id as *mut u32);
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, owner_id)
@@ -228,8 +256,6 @@ mod windows {
 
         Some((owner_id, owner_handle))
     }
-
-
 }
 
 #[cfg(target_os = "macos")]
