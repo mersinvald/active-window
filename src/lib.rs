@@ -214,7 +214,7 @@ mod linux {
         let process = Process::new(owner_pid as i32).ok()?;
 
         let path = process.exe().ok()?;
-        let name = path.file_name()?.to_str()?.to_string();
+        let name = path.file_stem()?.to_str()?.to_ascii_lowercase();
 
         Some(OwnerInfo {
             name,
@@ -337,12 +337,12 @@ mod windows {
         }
 
         let mut owner_path = get_process_path(owner_handle)?;
-        let mut owner_name = owner_path.file_name()?;
+        let mut owner_name = owner_path.file_stem()?;
 
         // ApplicationFrameHost & Universal Windows Platform Support
         if owner_name == "ApplicationFrameHost.exe" {
             owner_path = get_subwindow_process_path(handle, &owner_path)?;
-            owner_name = owner_path.file_name()?;
+            owner_name = owner_path.file_stem()?;
         }
 
         unsafe {
@@ -350,7 +350,7 @@ mod windows {
         }
 
         Some(OwnerInfo {
-            name: owner_name.to_str()?.to_string(),
+            name: owner_name.to_str()?.to_ascii_lowercase(),
             path: owner_path,
             id: owner_id as i64,
             bundle: None,
